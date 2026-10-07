@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#080d1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Device Radar</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at top,#182541 0%,#080d1a 55%);color:#f2f5ff;font-family:Arial,Helvetica,sans-serif}
+header{padding:20px 16px 12px;text-align:center}
+header h1{margin:0;font-size:28px}
+header p{margin:5px 0 0;color:#9ca9c7;font-size:13px}
+main{max-width:700px;margin:auto;padding:10px 14px 40px}
+.card{background:rgba(16,25,45,.94);border:1px solid #263451;border-radius:18px;padding:16px;margin-bottom:14px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+button{border:0;border-radius:12px;padding:13px 16px;margin:4px;font-weight:bold;font-size:14px;background:#5da3ff;color:#06101e}
+button.secondary{background:#263450;color:#fff}
+button.danger{background:#642c38;color:#fff}
+button:disabled{opacity:.4}
+.status{color:#9daaca;font-size:13px}
+.big-number{text-align:center;font-size:44px;font-weight:bold;margin-top:10px}
+.signal-meter{height:30px;background:#222d46;border-radius:20px;overflow:hidden;margin:15px 0}
+.signal-fill{height:100%;width:0%;background:linear-gradient(90deg,#ff5969,#ffc857,#45d99a);transition:width .3s}
+.meter-labels{display:flex;justify-content:space-between;color:#8f9db9;font-size:11px}
+canvas{width:100%;height:220px;background:#080e1b;border:1px solid #263451;border-radius:12px}
+.device{background:#0c1426;border:1px solid #293754;border-radius:13px;padding:13px;margin-top:9px}
+.device.selected{border-color:#5da3ff}
+.device-name{font-weight:bold}
+.device-id{color:#8491ad;font-size:11px;margin-top:4px;word-break:break-all}
+.pill{display:inline-block;background:#25314b;border-radius:20px;padding:5px 9px;font-size:11px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.stat{background:#0a1120;border-radius:12px;padding:12px}
+.stat span{color:#8794b1;font-size:11px}
+.stat strong{display:block;font-size:21px;margin-top:3px}
+.notice{color:#aeb9d1;font-size:12px;line-height:1.5}
+.center{text-align:center}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:5px}
+.between{justify-content:space-between}
+.mini{height:8px;background:#222d46;border-radius:8px;overflow:hidden;margin-top:9px}
+.mini>div{height:100%;border-radius:8px;transition:width .3s}
+.spark{width:100%;height:26px;margin-top:6px;display:block}
+footer{text-align:center;color:#64728e;font-size:10px;padding:20px}
+</style>
+</head>
+<body>
+<header><h1>📡 Device Radar</h1><p>Wireless device inspection &amp; signal monitor</p></header>
+<main>
+
+<section class="card">
+  <div class="row between">
+    <div><strong>Bluetooth / BLE Scanner</strong><div class="status" id="status">Ready</div></div>
+    <span class="pill" id="support">Checking...</span>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <button id="scanAllButton">📡 Start Scanning</button>
+    <button id="stopButton" class="secondary" disabled>Stop</button>
+  </div>
+  <div id="alertBox" style="display:none;background:#3a2a14;border:1px solid #ffc857;border-radius:12px;padding:12px;margin-top:10px;font-size:13px;line-height:1.5"></div>
+  <p class="notice">Detect-only: this app never pairs or connects. It just listens for nearby Bluetooth LE broadcasts and lists them with signal strength. Tap a device in the list to track it.</p>
+</section>
+
+<section class="card">
+  <div class="row between">
+    <div><strong id="deviceName">No device selected</strong><div class="status" id="deviceId">Select a device from the list.</div></div>
+  </div>
+  <canvas id="gauge" width="400" height="230" style="height:auto;max-width:340px;display:block;margin:10px auto 0;background:transparent;border:0"></canvas>
+  <div class="big-number" id="rssi">— dBm</div>
+  <div class="center status">Relative signal strength</div>
+  <div class="signal-meter"><div class="signal-fill" id="signalFill"></div></div>
+  <div class="meter-labels"><span>Weak</span><span id="strengthText">No reading</span><span>Strong</span></div>
+  <div class="row" style="justify-content:center;margin-top:12px">
+    <button id="finderButton" class="secondary" disabled>🎯 Finder Mode</button>
+  </div>
+</section>
+
+<section class="card">
+  <div class="row between"><strong>📈 Live Signal Graph</strong><span class="pill" id="peak">Peak: —</span></div><br>
+  <canvas id="graph" width="700" height="220"></canvas>
+  <div class="row between" style="font-size:11px;color:#8290ad"><span>Older</span><span>Newest</span></div><br>
+  <button id="clearGraph" class="secondary">Clear Graph</button>
+</section>
+
+<section class="card">
+  <div class="row between"><strong>🎯 Proximity Finder</strong><span class="pill" id="finderStatus">OFF</span></div>
+  <div class="grid" style="margin-top:12px">
+    <div class="stat"><span>Current signal</span><strong id="finderCurrent">—</strong></div>
+    <div class="stat"><span>Change</span><strong id="finderChange">—</strong></div>
+  </div>
+  <p class="notice" id="finderMessage">Turn Finder Mode on after selecting a device. Moving toward a transmitter will generally increase signal strength, but walls and reflections can affect RSSI.</p>
+</section>
+
+<section class="card">
+  <div class="row between"><strong>📊 Signal Comparison</strong><span class="pill">Top 8</span></div><br>
+  <canvas id="compare" width="700" height="300"></canvas>
+</section>
+
+<section class="card">
+  <div class="row between"><strong>🔎 Discovered Devices</strong><span class="pill" id="deviceCount">0</span></div>
+  <div id="deviceList"><p class="status">No devices discovered yet.</p></div>
+</section>
+
+<section class="card">
+  <div class="row between"><strong>🕒 Detection History</strong><button id="clearHistory" class="danger">Clear</button></div>
+  <div id="history" class="notice" style="margin-top:10px">No saved readings.</div>
+</section>
+
+<section class="card center">
+  <strong>📤 Export Data</strong><br>
+  <button id="exportButton">Export CSV</button>
+</section>
+
+<section class="card">
+  <strong>🧰 Other devices &amp; platforms</strong>
+  <p class="notice"><b>Phones/tablets/laptops:</b> they only show up here if they are advertising over Bluetooth LE; many phones randomize their ID and only advertise briefly.<br>
+  <b>iPhone/iPad:</b> browsers can't scan Bluetooth. Use nRF Connect or LightBlue for Bluetooth, and Fing for devices on your Wi-Fi.<br>
+  <b>Wi-Fi network devices (cameras, smart plugs, etc.):</b> use Fing or your router's connected-devices page.<br>
+  <b>Hidden cameras:</b> most don't broadcast Bluetooth. Check the Wi-Fi device list for unknown devices, then do a physical check (flashlight for lens glints, look at chargers, smoke detectors, clocks, vents).<br>
+  <b>Chrome flag for Scan All:</b> <code>chrome://flags/#enable-experimental-web-platform-features</code></p>
+</section>
+
+<section class="card">
+  <strong>ℹ️ About Device Radar</strong>
+  <p class="notice">This application detects wireless devices that your browser is permitted to access. It does not guarantee detection of hidden cameras, microphones, phones, or other electronics.<br><br>RSSI is a relative radio-signal measurement. Use it to tell whether a signal is getting stronger or weaker rather than as an exact distance measurement.</p>
+</section>
+
+</main>
+<footer>Device Radar • PWA</footer>
+
+<script>
+let devices = new Map(), selectedDevice = null, graphData = [], peak = -Infinity, finderMode = false, finderBaseline = null;
+const historyKey = "deviceRadarHistory";
+const $ = id => document.getElementById(id);
+const statusEl=$("status"), stopButton=$("stopButton"), support=$("support"),
+  deviceName=$("deviceName"), deviceId=$("deviceId"), rssi=$("rssi"),
+  signalFill=$("signalFill"), strengthText=$("strengthText"), finderButton=$("finderButton"), finderStatus=$("finderStatus"), finderCurrent=$("finderCurrent"),
+  finderChange=$("finderChange"), deviceList=$("deviceList"), deviceCount=$("deviceCount"),
+  historyElement=$("history"), canvas=$("graph"), ctx=canvas.getContext("2d");
+
+
+const signalPercent = v => Number.isFinite(v) ? Math.max(0, Math.min(100, (v + 100) * 1.25)) : 0;
+const signalDescription = v => v >= -55 ? "Strong" : v >= -70 ? "Good" : v >= -82 ? "Moderate" : "Weak";
+const escapeHTML = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
+
+stopButton.onclick = async function () {
+  await stopAllScan();
+  statusEl.textContent = "Scan stopped.";
+  stopButton.disabled = true;
+};
+
+function selectDevice(device) {
+  selectedDevice = device;
+  deviceName.textContent = device.name || "Unknown BLE Device";
+  deviceId.textContent = device.id || "Identifier unavailable";
+  finderButton.disabled = false;
+  if (Number.isFinite(device.rssi)) updateSignal(device.rssi);
+  renderDevices();
+}
+
+function meterColor(p) { return p < 35 ? "#ff5969" : p < 65 ? "#ffc857" : "#45d99a"; }
+function sparkSVG(h) {
+  if (!h || h.length < 2) return "";
+  const pts = h.map((v, i) => (i / (h.length - 1) * 100).toFixed(1) + "," + (24 - signalPercent(v) / 100 * 22 - 1).toFixed(1)).join(" ");
+  return `<svg class="spark" viewBox="0 0 100 24" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="#5da3ff" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+function drawGauge(v) {
+  const c = $("gauge"), g = c.getContext("2d"), w = c.width, h = c.height;
+  const cx = w / 2, cy = h - 40, r = Math.min(w / 2 - 40, h - 70);
+  g.clearRect(0, 0, w, h);
+  [["#ff5969", 0, .33], ["#ffc857", .33, .66], ["#45d99a", .66, 1]].forEach(([col, a, b]) => {
+    g.beginPath(); g.strokeStyle = col; g.lineWidth = 24;
+    g.arc(cx, cy, r, Math.PI + a * Math.PI, Math.PI + b * Math.PI); g.stroke();
+  });
+  g.fillStyle = "#8f9db9"; g.font = "16px Arial"; g.textAlign = "center";
+  g.fillText("-100", cx - r, cy + 24); g.fillText("-60", cx, cy - r - 22); g.fillText("-20", cx + r, cy + 24);
+  const has = Number.isFinite(v), p = has ? signalPercent(v) / 100 : 0, a = Math.PI + p * Math.PI;
+  g.strokeStyle = has ? "#f2f5ff" : "#4a5878"; g.lineWidth = 5; g.lineCap = "round";
+  g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * (r - 26), cy + Math.sin(a) * (r - 26)); g.stroke();
+  g.fillStyle = has ? "#f2f5ff" : "#4a5878"; g.beginPath(); g.arc(cx, cy, 10, 0, 7); g.fill();
+}
+
+function drawCompare() {
+  const c = $("compare"), g = c.getContext("2d"), w = c.width, h = c.height;
+  g.clearRect(0, 0, w, h);
+  const list = [...devices.values()].filter(d => Number.isFinite(d.rssi)).sort((a, b) => b.rssi - a.rssi).slice(0, 8);
+  g.font = "20px Arial";
+  if (!list.length) { g.fillStyle = "#8794b1"; g.textAlign = "center"; g.fillText("No signal readings yet", w / 2, h / 2); return; }
+  const rowH = (h - 10) / list.length, labelW = 190, barMax = w - labelW - 110;
+  list.forEach((d, i) => {
+    const y = 5 + i * rowH, p = signalPercent(d.rssi);
+    g.fillStyle = "#c8d1e6"; g.textAlign = "left";
+    g.fillText((d.name || "Unknown").slice(0, 16), 8, y + rowH * .62);
+    g.fillStyle = "#222d46"; g.fillRect(labelW, y + 6, barMax, rowH - 14);
+    g.fillStyle = meterColor(p); g.fillRect(labelW, y + 6, barMax * p / 100, rowH - 14);
+    g.fillStyle = "#f2f5ff"; g.fillText(d.rssi + " dBm", labelW + barMax + 10, y + rowH * .62);
+  });
+}
+
+function renderDevices() {
+  drawCompare();
+  deviceCount.textContent = devices.size;
+  deviceList.innerHTML = "";
+  if (devices.size === 0) { deviceList.innerHTML = '<p class="status">No devices discovered yet.</p>'; return; }
+  [...devices.values()].sort((a,b)=>(Number.isFinite(b.rssi)?b.rssi:-999)-(Number.isFinite(a.rssi)?a.rssi:-999)).forEach(device => {
+    const div = document.createElement("div");
+    div.className = "device";
+    if (selectedDevice && selectedDevice.id === device.id) div.classList.add("selected");
+    div.innerHTML = `<div class="row between"><span class="device-name">${escapeHTML(device.name || "Unknown BLE Device")}</span>
+      <span class="pill">${Number.isFinite(device.rssi) ? device.rssi + " dBm" : "RSSI unavailable"}</span></div>
+      <div class="device-id">${escapeHTML(device.id || "Identifier unavailable")}</div>
+      <div class="mini"><div style="width:${signalPercent(device.rssi)}%;background:${meterColor(signalPercent(device.rssi))}"></div></div>
+      ${sparkSVG(device.hist)}`;
+    div.onclick = () => selectDevice(device);
+    deviceList.appendChild(div);
+  });
+}
+
+function updateSignal(value) {
+  if (!Number.isFinite(value) || !selectedDevice) return;
+  selectedDevice.rssi = value;
+  devices.set(selectedDevice.id, selectedDevice);
+  rssi.textContent = value + " dBm";
+  signalFill.style.width = signalPercent(value) + "%";
+  drawGauge(value);
+  strengthText.textContent = signalDescription(value);
+  if (value > peak) { peak = value; $("peak").textContent = "Peak: " + peak + " dBm"; }
+  graphData.push({ time: Date.now(), value });
+  const cutoff = Date.now() - 60000;
+  graphData = graphData.filter(x => x.time >= cutoff);
+  if (finderMode) {
+    finderCurrent.textContent = value + " dBm";
+    if (finderBaseline === null) finderBaseline = value;
+    const change = value - finderBaseline;
+    finderChange.textContent = (change >= 0 ? "+" : "") + change.toFixed(0) + " dB";
+  }
+  saveReading(selectedDevice, value);
+  renderDevices();
+  drawGraph();
+}
+
+function drawGraph() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "#27324d"; ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    const y = 20 + i * ((canvas.height - 40) / 4);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+  ctx.fillStyle = "#8290ad"; ctx.font = "20px Arial"; ctx.textAlign = "left";
+  ctx.fillText("-30", 4, 16); ctx.fillText("-65", 4, canvas.height / 2 - 4); ctx.fillText("-100", 4, canvas.height - 24);
+  if (graphData.length < 2) return;
+  const min = -100, max = -30;
+  ctx.strokeStyle = "#5da3ff"; ctx.lineWidth = 3; ctx.beginPath();
+  graphData.forEach((p, i) => {
+    const x = (i / (graphData.length - 1)) * canvas.width;
+    const y = 20 + ((max - p.value) / (max - min)) * (canvas.height - 40);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+finderButton.onclick = function () {
+  finderMode = !finderMode;
+  if (finderMode) {
+    finderStatus.textContent = "ON"; finderButton.textContent = "🎯 Finder ON";
+    finderBaseline = selectedDevice && Number.isFinite(selectedDevice.rssi) ? selectedDevice.rssi : null;
+    finderCurrent.textContent = selectedDevice?.rssi ?? "—";
+  } else {
+    finderStatus.textContent = "OFF"; finderButton.textContent = "🎯 Finder Mode"; finderBaseline = null;
+  }
+};
+
+function getHistory() { try { return JSON.parse(localStorage.getItem(historyKey) || "[]"); } catch (e) { return []; } }
+function saveReading(device, value) {
+  const h = getHistory();
+  h.unshift({ timestamp: new Date().toISOString(), name: device.name, id: device.id, rssi: value });
+  try { localStorage.setItem(historyKey, JSON.stringify(h.slice(0, 500))); } catch (e) {}
+  renderHistory();
+}
+function renderHistory() {
+  const h = getHistory();
+  if (!h.length) { historyElement.textContent = "No saved readings."; return; }
+  historyElement.innerHTML = h.slice(0, 30).map(i =>
+    `${new Date(i.timestamp).toLocaleString()} — <strong>${escapeHTML(i.name || "Unknown")}</strong> — ${i.rssi} dBm<br>`).join("");
+}
+
+$("exportButton").onclick = function () {
+  let csv = "timestamp,name,id,rssi_dBm\n";
+  getHistory().forEach(i => { csv += `"${i.timestamp}","${i.name || ""}","${i.id || ""}","${i.rssi}"\n`; });
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = "device_radar_history.csv"; a.click();
+  URL.revokeObjectURL(url);
+};
+
+$("clearHistory").onclick = function () {
+  if (confirm("Delete all local detection history?")) { localStorage.removeItem(historyKey); renderHistory(); }
+};
+
+$("clearGraph").onclick = function () {
+  graphData = []; peak = -Infinity; $("peak").textContent = "Peak: —"; drawGraph();
+};
+
+
+/* ---------- SCAN ALL NEARBY (native Android app or experimental Web Bluetooth) ---------- */
+const scanAllButton = $("scanAllButton");
+let allScanMode = null, webScanHandle = null, nativeListener = null, renderTimer = null;
+const native = () => window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform() && Capacitor.Plugins && Capacitor.Plugins.BluetoothLe;
+
+function scheduleRender() { if (allScanMode) statusEl.textContent = "Scanning... " + devices.size + " device" + (devices.size === 1 ? "" : "s") + " found"; if (renderTimer) return; renderTimer = setTimeout(() => { renderTimer = null; renderDevices(); }, 600); }
+
+function onAdv(id, name, value) {
+  if (!id) return;
+  let item = devices.get(id);
+  if (!item) { item = { id, name: name || "Unknown BLE Device", rssi: null, raw: null, hist: [] }; devices.set(id, item); }
+  if (name && /^Unknown/.test(item.name)) item.name = name;
+  if (typeof value !== "number" || value > 0 || value < -127) value = null;
+  item.rssi = value;
+  if (value !== null) { (item.hist = item.hist || []).push(value); if (item.hist.length > 40) item.hist.shift(); }
+  if (selectedDevice && selectedDevice.id === id && value !== null) updateSignal(value);
+  else scheduleRender();
+}
+
+async function startAllScan() {
+  try {
+    if (native()) {
+      const BLE = Capacitor.Plugins.BluetoothLe;
+      await BLE.initialize({ androidNeverForLocation: false });
+      nativeListener = await BLE.addListener("onScanResult", r => onAdv(r.device && r.device.deviceId, r.localName || (r.device && r.device.name), r.rssi));
+      await BLE.requestLEScan({ allowDuplicates: true });
+      allScanMode = "native";
+    } else if (navigator.bluetooth && navigator.bluetooth.requestLEScan) {
+      webScanHandle = await navigator.bluetooth.requestLEScan({ acceptAllAdvertisements: true, keepRepeatedDevices: true });
+      navigator.bluetooth.addEventListener("advertisementreceived", webAdv);
+      allScanMode = "web";
+    } else {
+      statusEl.textContent = "Scanning isn't available in this browser.";
+      showAlert(UNSUPPORTED); window.scrollTo(0, 0);
+      return;
+    }
+    scanAllButton.disabled = true; stopButton.disabled = false;
+    $("alertBox").style.display = "none";
+    statusEl.textContent = "Scanning... waiting for devices";
+    clearTimeout(window._emptyT);
+    window._emptyT = setTimeout(() => { if (allScanMode && devices.size === 0) showAlert("<b>No devices found yet.</b> Check that Bluetooth and Location are on, and that devices are nearby. Many phones advertise only briefly."); }, 15000);
+  } catch (err) {
+    statusEl.textContent = "Scan failed: " + (err.message || err);
+    showAlert("<b>Scan failed:</b> " + escapeHTML(err.message || err) + "<br>Make sure Bluetooth and Location are turned on and permission is allowed, then try again.");
+    window.scrollTo(0, 0);
+  }
+}
+function webAdv(e) { onAdv(e.device && e.device.id, e.device && e.device.name, e.rssi); }
+
+async function stopAllScan() {
+  try {
+    if (allScanMode === "native") {
+      await Capacitor.Plugins.BluetoothLe.stopLEScan();
+      if (nativeListener) await nativeListener.remove();
+      nativeListener = null;
+    } else if (allScanMode === "web") {
+      navigator.bluetooth.removeEventListener("advertisementreceived", webAdv);
+      if (webScanHandle && webScanHandle.stop) webScanHandle.stop();
+      webScanHandle = null;
+    }
+  } catch (e) {}
+  if (allScanMode) { allScanMode = null; scanAllButton.disabled = false; clearTimeout(window._emptyT); renderDevices(); }
+}
+scanAllButton.onclick = startAllScan;
+const canScan = () => !!native() || !!(navigator.bluetooth && navigator.bluetooth.requestLEScan);
+function showAlert(html) { const a = $("alertBox"); a.innerHTML = html; a.style.display = "block"; }
+const UNSUPPORTED = "<b>This browser can't list nearby Bluetooth devices.</b><br>Chrome only allows it behind an experimental flag, and iPhone/Safari doesn't allow it at all.<br><br><b>Option 1 (Android Chrome):</b> open <code>chrome://flags/#enable-experimental-web-platform-features</code>, set it to <b>Enabled</b>, tap Relaunch, then reopen this app and tap Start Scanning. Also turn on Bluetooth and Location.<br><b>Option 2 (most reliable):</b> install the Android app version (APK) from the project README; it needs no flags.";
+if (canScan()) support.textContent = native() ? "Native BLE ready" : "Scan ready";
+else { support.textContent = "Scan unavailable"; showAlert(UNSUPPORTED); }
+
+renderHistory(); drawGraph(); drawGauge(null); drawCompare();
+
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+</script>
+</body>
+</html>
